@@ -1,0 +1,20 @@
+{
+  "name": "kkm-paper-api",
+  "version": "1.0.0",
+  "main": "dist/src/functions/*.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "npm run build && func start",
+    "watch": "tsc -w"
+  },
+  "dependencies": {
+    "@azure/functions": "^4.11.0",
+    "@azure/identity": "^4.2.0",
+    "@azure/storage-blob": "^12.19.0",
+    "axios": "^1.6.8"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.10",
+    "typescript": "^5.5.4"
+  }
+}
