@@ -3,7 +3,7 @@ import axios from "axios";
 const api = axios.create({
   // Azure Static Web Apps에서는 Functions가 같은 도메인의 /api 아래로 노출됩니다.
   // 로컬 개발/별도 배포 시에는 VITE_UPLOAD_API_BASE 로 오버라이드 가능합니다.
-  baseURL: import.meta.env.VITE_UPLOAD_API_BASE || "",
+  //baseURL: import.meta.env.VITE_UPLOAD_API_BASE || "",
   timeout: 60000,
 });
 
