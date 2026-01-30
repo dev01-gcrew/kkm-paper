@@ -28,6 +28,62 @@ async function load() {
   }
 }
 
+// ✅ Azure(Functions) 서버에서 PDF를 직접 다운로드하면 403(봇/클라우드 IP 차단)이 자주 발생할 수 있어서
+//    브라우저에서 PDF를 받아 base64로 전달하는 방식을 기본으로 사용합니다.
+async function fetchPdfBase64(pdfUrl: string): Promise<string> {
+  const response = await fetch(pdfUrl, { redirect: "follow" });
+  if (!response.ok) {
+    throw new Error(`PDF 접근 실패: ${response.status} ${response.statusText}`);
+  }
+  const blob = await response.blob();
+
+  const base64 = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const result = reader.result;
+      if (typeof result !== "string") return reject(new Error("파일 읽기 결과가 문자열이 아닙니다."));
+
+      // data:application/pdf;base64,AAAA...
+      const idx = result.indexOf(",");
+      resolve(idx >= 0 ? result.slice(idx + 1) : result);
+    };
+    reader.onerror = () => reject(new Error("파일 읽기 오류"));
+    reader.readAsDataURL(blob);
+  });
+
+  return base64;
+}
+
+async function downloadPdf() {
+  const pdfUrl = paper.value?.openAccessPdf?.url;
+  if (!pdfUrl) return;
+
+  // 1) 먼저 Azure Storage에 저장(PDF + JSON 메타)
+  //    (서버가 pdfUrl을 직접 다운받지 않도록 pdfBase64를 같이 보냄)
+  try {
+    const pdfBase64 = await fetchPdfBase64(pdfUrl);
+
+    await storeToAzureBlob({
+      paperId: paper.value!.paperId,
+      title: paper.value!.title,
+      year: typeof paper.value!.year === "string" ? parseInt(paper.value!.year, 10) : paper.value!.year,
+      venue: paper.value!.venue,
+      authors: paper.value!.authors,
+      paperUrl: paper.value!.url,
+      pdfUrl,
+      pdfBase64,
+    });
+  } catch (e: any) {
+    // 저장 실패해도 사용자는 PDF를 볼 수 있게 다운로드는 진행
+    console.warn("스토리지 저장 실패:", e?.message ?? e);
+  }
+
+  // 2) 사용자 다운로드(새 탭)
+  window.open(pdfUrl, "_blank", "noreferrer");
+}
+
+
+/*
 async function downloadPdf() {
   const url = paper.value?.openAccessPdf?.url;
   if (!url) return;
@@ -52,6 +108,8 @@ async function downloadPdf() {
   // 2) 사용자 다운로드(새 탭)
   window.open(url, "_blank", "noreferrer");
 }
+*/
+
 
 
 // Azure Blob Storage 저장: 프론트 -> Azure Functions -> Blob(PDF) + JSON(메타) 저장
