@@ -5,24 +5,6 @@ import { getPaper, type Paper } from "@/api/semanticScholar";
 // (선택) 백엔드 업로드 API
 import { uploadToSharePoint, storeToAzureBlob } from "@/api/uploadApi";
 
-// PDF URL을 브라우저에서 받아 base64(DataURL)로 변환
-async function fetchPdfAsBase64(pdfUrl: string): Promise<string> {
-  const res = await fetch(pdfUrl, {
-    mode: "cors",
-    credentials: "omit",
-  });
-  if (!res.ok) {
-    throw new Error(`PDF fetch failed: ${res.status}`);
-  }
-  const blob = await res.blob();
-  return await new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = () => resolve(reader.result as string);
-    reader.onerror = reject;
-    reader.readAsDataURL(blob);
-  });
-}
-
 const route = useRoute();
 const paperId = String(route.params.paperId);
 
@@ -52,15 +34,7 @@ async function downloadPdf() {
 
   // 1) 먼저 Azure Storage에 저장(PDF + JSON 메타)
   try {
-    // MDPI 등 서버에서 직접 받으면 403이 나는 경우가 있어
-    // 브라우저에서 PDF를 받아 base64로 전달(우회)
-    let pdfBase64: string | undefined;
-    try {
-      pdfBase64 = await fetchPdfAsBase64(url);
-    } catch (e: any) {
-      console.warn("PDF base64 변환 실패(계속 진행):", e?.message ?? e);
-    }
-    
+
     await storeToAzureBlob({
       paperId: paper.value!.paperId,
       title: paper.value!.title,
@@ -69,7 +43,6 @@ async function downloadPdf() {
       authors: paper.value!.authors,
       paperUrl: paper.value!.url,
       pdfUrl: url,
-      pdfBase64,
     });
   } catch (e: any) {
     // 저장 실패해도 사용자는 PDF를 볼 수 있게 다운로드는 진행
@@ -87,12 +60,7 @@ async function storeToBlob() {
     alert("오픈액세스 PDF 링크가 없어서 저장할 수 없습니다.");
     return;
   }
-  let pdfBase64: string | undefined;
-  try {
-    pdfBase64 = await fetchPdfAsBase64(paper.value.openAccessPdf.url);
-  } catch (e: any) {
-    console.warn("PDF base64 변환 실패(계속 진행):", e?.message ?? e);
-  }
+  
   const res = await storeToAzureBlob({
     paperId: paper.value.paperId,
     title: paper.value.title,
@@ -101,7 +69,6 @@ async function storeToBlob() {
     authors: paper.value.authors,
     paperUrl: paper.value.url,
     pdfUrl: paper.value.openAccessPdf.url,
-    pdfBase64,
   });
   alert(`저장 완료\nPDF: ${res.pdfBlobName}\nMETA: ${res.jsonBlobName}`);
 }
