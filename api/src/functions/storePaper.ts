@@ -1,7 +1,7 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from "@azure/functions";
 import axios, { AxiosError } from "axios";
 import { BlobServiceClient, ContainerClient } from "@azure/storage-blob";
-import { DefaultAzureCredential } from "@azure/identity";
+//import { DefaultAzureCredential } from "@azure/identity";
 
 type PaperAuthor = {
   name: string;
@@ -141,17 +141,17 @@ export async function storePaper(req: HttpRequest, ctx: InvocationContext): Prom
 
   try {
     step = "read_env";
-    const storageAccountUrl = process.env.STORAGE_ACCOUNT_URL;
+    //const storageAccountUrl = process.env.STORAGE_ACCOUNT_URL;
     const containerName = process.env.STORAGE_CONTAINER || "papers";
 
-    if (!storageAccountUrl) {
-      return jsonResponse(500, {
-        requestId,
-        step,
-        message: "STORAGE_ACCOUNT_URL 이 설정되지 않았습니다.",
-        hint: "Static Web App > 구성(Configuration) > 애플리케이션 설정에 STORAGE_ACCOUNT_URL을 추가하세요.",
-      });
-    }
+    //if (!storageAccountUrl) {
+    //  return jsonResponse(500, {
+    //    requestId,
+    //    step,
+    //    message: "STORAGE_ACCOUNT_URL 이 설정되지 않았습니다.",
+    //    hint: "Static Web App > 구성(Configuration) > 애플리케이션 설정에 STORAGE_ACCOUNT_URL을 추가하세요.",
+    //  });
+    //}
 
     step = "read_body";
     const body = (await req.json().catch((e: unknown) => {
@@ -168,9 +168,23 @@ export async function storePaper(req: HttpRequest, ctx: InvocationContext): Prom
     }
 
     step = "create_blob_client";
-    const credential = new DefaultAzureCredential();
-    const blobServiceClient = new BlobServiceClient(storageAccountUrl, credential);
+    //const credential = new DefaultAzureCredential();
+    //const blobServiceClient = new BlobServiceClient(storageAccountUrl, credential);
+    //const containerClient = blobServiceClient.getContainerClient(containerName);
+    const connectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
+    if (!connectionString) {
+      return jsonResponse(500, {
+        requestId,
+        step,
+        message: "AZURE_STORAGE_CONNECTION_STRING 이 설정되지 않았습니다.",
+        hint:
+          "Azure Portal > Static Web App(kkm-paper-app) > 구성(Configuration) > 애플리케이션 설정에 AZURE_STORAGE_CONNECTION_STRING 을 추가하세요.",
+      });
+    }
+
+    const blobServiceClient = BlobServiceClient.fromConnectionString(connectionString);
     const containerClient = blobServiceClient.getContainerClient(containerName);
+
 
     step = "create_container_if_not_exists";
     await containerClient.createIfNotExists();
