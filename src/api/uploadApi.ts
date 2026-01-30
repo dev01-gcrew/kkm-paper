@@ -25,6 +25,8 @@ export async function storeToAzureBlob(payload: {
   authors?: { name: string }[];
   paperUrl?: string;
   pdfUrl: string;
+  pdfBase64?: string;
+  pdfFileName?: string;
 }) {
   // Azure Functions (api/store-paper)로 저장 요청
   const res = await api.post("/api/store-paper", payload);
