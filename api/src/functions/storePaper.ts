@@ -1,5 +1,5 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from "@azure/functions";
-import axios, { AxiosError } from "axios";
+import axios, { AxiosError, type AxiosRequestConfig } from "axios";
 import { BlobServiceClient, ContainerClient } from "@azure/storage-blob";
 //import { DefaultAzureCredential } from "@azure/identity";
 
@@ -140,6 +140,90 @@ function errorToJson(err: unknown): ErrorJson {
   };
 }
 
+// ---------------------------
+// MDPI 403 우회용 다운로드 로직
+// ---------------------------
+function isMdpiPdfUrl(url: string): boolean {
+  try {
+    const u = new URL(url);
+    return u.hostname.endsWith("mdpi.com") && u.pathname.includes("/pdf");
+ } catch {
+    return false;
+  }
+}
+
+function browserLikeHeaders(extra?: Record<string, string>) {
+  return {
+    "User-Agent":
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36",
+    "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+    "Cache-Control": "no-cache",
+    Pragma: "no-cache",
+    ...extra,
+  };
+}
+
+async function downloadPdfWithFallback(pdfUrl: string, paperUrl?: string): Promise<Buffer> {
+  // 1) 기본 다운로드 시도
+  const baseConfig: AxiosRequestConfig = {
+    url: pdfUrl,
+    method: "get",
+    timeout: 60000,
+    responseType: "arraybuffer",
+    maxRedirects: 5,
+    headers: browserLikeHeaders({
+      Accept: "application/pdf,application/octet-stream;q=0.9,*/*;q=0.8",
+      Referer: paperUrl ?? "https://www.mdpi.com/",
+    }),
+    validateStatus: (s) => s >= 200 && s < 400,
+  };
+
+  try {
+    const r = await axios.request<ArrayBuffer>(baseConfig);
+    return Buffer.from(r.data);
+  } catch (e: any) {
+    const status = e?.response?.status;
+    // 2) MDPI + 403이면: HTML 먼저 호출해서 set-cookie 확보 후 PDF 재요청
+    if (status === 403 && isMdpiPdfUrl(pdfUrl)) {
+      // pdfUrl: https://www.mdpi.com/.../pdf?version=...
+      // htmlUrl: https://www.mdpi.com/...  (pdf 제거)
+      const htmlUrl = pdfUrl.replace(/\/pdf(\?.*)?$/, "");
+
+      const htmlRes = await axios.get<string>(htmlUrl, {
+        timeout: 60000,
+        maxRedirects: 5,
+        headers: browserLikeHeaders({
+          Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          Referer: "https://www.mdpi.com/",
+        }),
+        validateStatus: (s) => s >= 200 && s < 400,
+      });
+
+      const setCookie = (htmlRes.headers as any)?.["set-cookie"];
+      const cookieHeader =
+        Array.isArray(setCookie) && setCookie.length > 0
+          ? setCookie.map((c: string) => c.split(";")[0]).join("; ")
+          : "";
+
+      const pdfRes2 = await axios.get<ArrayBuffer>(pdfUrl, {
+        responseType: "arraybuffer",
+        timeout: 60000,
+        maxRedirects: 5,
+        headers: browserLikeHeaders({
+          Accept: "application/pdf,application/octet-stream;q=0.9,*/*;q=0.8",
+          Referer: htmlUrl,
+          ...(cookieHeader ? { Cookie: cookieHeader } : {}),
+        }),
+        validateStatus: (s) => s >= 200 && s < 400,
+      });
+
+      return Buffer.from(pdfRes2.data);
+    }
+
+    throw e;
+  }
+}
+
 export async function storePaper(req: HttpRequest, ctx: InvocationContext): Promise<HttpResponseInit> {
   let step = "start";
   const requestId = ctx.invocationId ?? `req_${Date.now()}`;
@@ -200,26 +284,26 @@ export async function storePaper(req: HttpRequest, ctx: InvocationContext): Prom
 
       pdfBytes = Buffer.from(b64, "base64");
     } else {
-      // ✅ 2) pdfUrl을 서버에서 직접 다운로드 (일부 출판사(MDPI 등)는 403 가능)
-      const pdfRes = await axios.get<ArrayBuffer>(body.pdfUrl!, {
-        responseType: "arraybuffer",
-        timeout: 60000,
-        maxRedirects: 5,
-        headers: {
-          // 브라우저와 유사한 UA/Referer로 시도 (완전 해결 보장 X)
-          "User-Agent":
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36",
-          Accept: "application/pdf,application/octet-stream;q=0.9,*/*;q=0.8",
-          "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
-          //Referer: body.paperUrl ?? "https://www.mdpi.com/",
-          Referer: "https://www.mdpi.com/",
-          "Cache-Control": "no-cache",
-          "Pragma": "no-cache",
-        },
-        validateStatus: (status: number) => status >= 200 && status < 400,
-      });
+      
+      //// ✅ 2) pdfUrl을 서버에서 직접 다운로드 (일부 출판사(MDPI 등)는 403 가능)
+      //const pdfRes = await axios.get<ArrayBuffer>(body.pdfUrl!, {
+      //  responseType: "arraybuffer",
+      //  timeout: 60000,
+      //  maxRedirects: 5,
+      //  headers: {
+      //    // 브라우저와 유사한 UA/Referer로 시도 (완전 해결 보장 X)
+      //    "User-Agent":
+      //      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36",
+      //    Accept: "application/pdf,application/octet-stream;q=0.9,*/*;q=0.8",
+      //    "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+      //    Referer: body.paperUrl ?? "https://www.mdpi.com/",
+      //  },
+      //  validateStatus: (status: number) => status >= 200 && status < 400,
+      //});
+      //pdfBytes = Buffer.from(pdfRes.data);
 
-      pdfBytes = Buffer.from(pdfRes.data);
+      // ✅ 2) pdfUrl을 서버에서 직접 다운로드 (MDPI 403이면 HTML→쿠키 확보→PDF 재시도)
+      pdfBytes = await downloadPdfWithFallback(body.pdfUrl!, body.paperUrl);
     }
 
     step = "upload_pdf";
