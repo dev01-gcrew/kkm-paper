@@ -55,6 +55,7 @@ async function downloadPdf() {
 
 
 // Azure Blob Storage 저장: 프론트 -> Azure Functions -> Blob(PDF) + JSON(메타) 저장
+/*
 async function storeToBlob() {
   if (!paper.value?.openAccessPdf?.url) {
     alert("오픈액세스 PDF 링크가 없어서 저장할 수 없습니다.");
@@ -72,7 +73,71 @@ async function storeToBlob() {
   });
   alert(`저장 완료\nPDF: ${res.pdfBlobName}\nMETA: ${res.jsonBlobName}`);
 }
+*/
+// PaperDetailPage.vue 내의 storeToBlob 함수를 아래와 같이 교체하세요.
+async function storeToBlob() {
+  const pdfUrl = paper.value?.openAccessPdf?.url;
+  if (!pdfUrl) {
+    alert("오픈액세스 PDF 링크가 없어서 저장할 수 없습니다.");
+    return;
+  }
 
+  loading.value = true;
+
+  try {
+    // 1. 브라우저에서 직접 PDF fetch
+    const response = await fetch(pdfUrl);
+    if (!response.ok) {
+      throw new Error(`PDF 접근 실패: ${response.status} ${response.statusText}`);
+    }
+    const blob = await response.blob();
+
+    // 2. Blob -> Base64 변환 (TS2345 에러 해결 지점)
+    const pdfBase64 = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      
+      reader.onloadend = () => {
+        const result = reader.result;
+        if (typeof result === "string") {
+          const splitData = result.split(",");
+          // 배열의 두 번째 요소([1])가 존재하는지 확인하여 undefined 에러 방지
+          const base64Part = splitData[1];
+          if (base64Part !== undefined) {
+            resolve(base64Part);
+          } else {
+            // 콤마가 없는 경우 전체 결과 반환
+            resolve(result);
+          }
+        } else {
+          reject(new Error("파일 읽기 결과가 문자열이 아닙니다."));
+        }
+      };
+
+      reader.onerror = () => reject(new Error("파일 읽기 오류"));
+      reader.readAsDataURL(blob);
+    });
+
+    // 3. 서버 API 호출
+    // paper.value!.year가 string일 경우를 대비해 숫자로 변환 처리 추가
+    const res = await storeToAzureBlob({
+      paperId: paper.value!.paperId,
+      title: paper.value!.title,
+      year: typeof paper.value!.year === 'string' ? parseInt(paper.value!.year, 10) : paper.value!.year,
+      venue: paper.value!.venue,
+      authors: paper.value!.authors,
+      paperUrl: paper.value!.url,
+      pdfUrl: pdfUrl,
+      pdfBase64: pdfBase64,
+    });
+
+    alert(`저장 완료\nPDF: ${res.pdfBlobName}`);
+  } catch (e: any) {
+    console.error("저장 중 오류:", e);
+    alert(`저장 실패: ${e.message || "알 수 없는 오류"}`);
+  } finally {
+    loading.value = false;
+  }
+}
 
 // (선택) SharePoint 업로드: 프론트 -> Azure Functions -> Graph/SharePoint 처리
 async function upload() {

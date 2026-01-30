@@ -17,6 +17,7 @@ export async function uploadToSharePoint(payload: {
   return res.data;
 }
 
+
 export async function storeToAzureBlob(payload: {
   paperId: string;
   title: string;
